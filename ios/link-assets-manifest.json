@@ -1,0 +1,29 @@
+{
+  "migIndex": 1,
+  "data": [
+    {
+      "path": "assets/fonts/JetBrainsMono-Bold.ttf",
+      "sha1": "404c7cfdb45451f9072f41bfd8965f5bdf8642d7"
+    },
+    {
+      "path": "assets/fonts/JetBrainsMono-Regular.ttf",
+      "sha1": "072ed51d21ffabea053627413c2d377922497ec7"
+    },
+    {
+      "path": "assets/fonts/PlusJakartaSans-Bold.ttf",
+      "sha1": "f6765fbc36a4016a651977816a2d2228476cf936"
+    },
+    {
+      "path": "assets/fonts/PlusJakartaSans-Medium.ttf",
+      "sha1": "e3e1cc48d248815d10d3082c80cd82fa5c913b6c"
+    },
+    {
+      "path": "assets/fonts/PlusJakartaSans-Regular.ttf",
+      "sha1": "572c9225481394d301cf9f3135315211f9c0dc48"
+    },
+    {
+      "path": "assets/fonts/PlusJakartaSans-SemiBold.ttf",
+      "sha1": "19d682e4585d3ce7b081858108faa02c57e7b2fc"
+    }
+  ]
+}

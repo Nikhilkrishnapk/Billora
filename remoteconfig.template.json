@@ -1,0 +1,9 @@
+{
+  "parameters": {
+    "gst_rates": {
+      "defaultValue": { "value": "[0,3,5,18,40]" },
+      "description": "GST slabs offered in the item form (percent). GST 2.0 rates from 22 Sep 2025.",
+      "valueType": "JSON"
+    }
+  }
+}

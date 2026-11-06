@@ -1,0 +1,123 @@
+rules_version = '2';
+
+// Billora security rules (free Spark plan, no Cloud Functions).
+// PRD 15.1: a merchant can read and write only their own documents; saved bills can be
+// created but never updated or deleted; bill numbers are strictly sequential per financial year.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function changed() {
+      return request.resource.data.diff(resource == null ? {} : resource.data).affectedKeys();
+    }
+
+    // Indian financial year (1 Apr – 31 Mar, IST) of the server time, e.g. "2026-27".
+    function currentFy() {
+      let ist = request.time + duration.value(330, 'm');
+      let start = ist.month() >= 4 ? ist.year() : ist.year() - 1;
+      return string(start) + '-' + string((start + 1) % 100);
+    }
+
+    // "Is this mobile number registered?" before sign-in (PRD 3.1).
+    // Anyone may look up ONE number; nobody can list them.
+    match /registeredNumbers/{phone} {
+      allow get: if true;
+      allow list: if false;
+      allow create: if signedIn()
+        && phone == request.auth.token.phone_number
+        && request.resource.data.keys().hasOnly(['uid'])
+        && request.resource.data.uid == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    match /merchants/{uid} {
+      allow read: if isOwner(uid);
+      // Registration time is set by the server and never changes (PRD 12.3).
+      allow create: if isOwner(uid)
+        && request.resource.data.keys().hasOnly(['mobileNumber', 'ownerName', 'createdAt', 'lastLoginAt'])
+        && request.resource.data.mobileNumber == request.auth.token.phone_number
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.lastLoginAt == request.time;
+      allow update: if isOwner(uid)
+        && changed().hasOnly(['ownerName', 'lastLoginAt'])
+        && (!('lastLoginAt' in changed()) || request.resource.data.lastLoginAt == request.time);
+      allow delete: if false;
+
+      function validProfile(d) {
+        return d.keys().hasOnly([
+            'ownerName', 'companyName', 'contactNumber', 'email', 'addressLine', 'city', 'state', 'pincode',
+            'isGstRegistered', 'gstin', 'logoDataUri', 'qrPayload', 'qrCodeUpdatedAt', 'upiId',
+            'printerPaperWidth', 'complete', 'updatedAt'])
+          && (!('ownerName' in d) || (d.ownerName is string && d.ownerName.size() <= 50))
+          && (!('companyName' in d) || (d.companyName is string && d.companyName.size() <= 60))
+          && (!('contactNumber' in d) || d.contactNumber.matches('^[6-9][0-9]{9}$'))
+          && (!('pincode' in d) || d.pincode.matches('^[1-9][0-9]{5}$'))
+          && (!('printerPaperWidth' in d) || d.printerPaperWidth in [58, 80])
+          && (!('qrPayload' in d) || (d.qrPayload is string && d.qrPayload.size() <= 1000))
+          && (!('logoDataUri' in d) || d.logoDataUri == null
+              || (d.logoDataUri is string && d.logoDataUri.size() <= 300000))
+          && (!('isGstRegistered' in d) || d.isGstRegistered == false
+              || d.gstin.matches('^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$'));
+      }
+
+      match /settings/profile {
+        allow read: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && validProfile(request.resource.data)
+          && (!('qrCodeUpdatedAt' in changed()) || request.resource.data.qrCodeUpdatedAt == request.time);
+        allow delete: if false;
+      }
+
+      // Bill counter: only ever goes up by exactly one, and only for the current financial year.
+      match /counters/{fy} {
+        allow read: if isOwner(uid);
+        allow create: if isOwner(uid)
+          && fy == currentFy()
+          && request.resource.data.keys().hasOnly(['last', 'updatedAt'])
+          && request.resource.data.last == 1;
+        allow update: if isOwner(uid)
+          && request.resource.data.keys().hasOnly(['last', 'updatedAt'])
+          && request.resource.data.last == resource.data.last + 1;
+        allow delete: if false;
+      }
+
+      // Saved bills: created together with the counter step (same transaction), never changed.
+      match /bills/{billId} {
+        allow read: if isOwner(uid);
+        allow create: if isOwner(uid) && validBill(request.resource.data);
+        allow update, delete: if false;
+
+        function validBill(d) {
+          let counterPath = /databases/$(database)/documents/merchants/$(uid)/counters/$(d.fy);
+          return d.keys().hasOnly([
+              'billNumber', 'fy', 'sequence', 'billDatetime', 'customerName', 'customerMobile', 'items',
+              'subtotal', 'totalCgst', 'totalSgst', 'roundOff', 'grandTotal', 'businessSnapshot'])
+            && d.billDatetime == request.time
+            && d.fy == currentFy()
+            && d.sequence is int
+            && getAfter(counterPath).data.last == d.sequence
+            && (exists(counterPath) ? get(counterPath).data.last : 0) + 1 == d.sequence
+            && d.billNumber.matches('^INV/' + d.fy + '/0*' + string(d.sequence) + '$')
+            && d.customerMobile.matches('^[6-9][0-9]{9}$')
+            && d.customerName is string && d.customerName.size() >= 2 && d.customerName.size() <= 50
+            && d.items is list && d.items.size() >= 1 && d.items.size() <= 200
+            && d.grandTotal is number && d.subtotal is number;
+        }
+      }
+
+      match /customers/{mobile} {
+        allow read, write: if isOwner(uid) && mobile.matches('^[6-9][0-9]{9}$');
+      }
+      match /products/{productId} {
+        allow read, write: if isOwner(uid);
+      }
+    }
+  }
+}

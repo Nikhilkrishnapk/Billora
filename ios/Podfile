@@ -1,0 +1,43 @@
+# Resolve react_native_pods.rb with node to allow for hoisting
+require Pod::Executable.execute_command('node', ['-p',
+  'require.resolve(
+    "react-native/scripts/react_native_pods.rb",
+    {paths: [process.argv[1]]},
+  )', __dir__]).strip
+
+platform :ios, '15.5' # iOS 15.5+: ML Kit (QR-from-photo) needs 15.5; PRD 14.1 asks for iOS 15
+prepare_react_native_project!
+
+# React Native Firebase resolves Firebase through Swift Package Manager, which needs dynamic frameworks.
+use_frameworks! :linkage => :dynamic
+
+# ML Kit ships static frameworks; its React Native wrapper must be a static library
+# so the app target links ML Kit (dynamic linkage above is required by Firebase).
+pre_install do |installer|
+  installer.pod_targets.each do |pod|
+    if pod.name.start_with?('RNMLKit')
+      def pod.build_type
+        Pod::BuildType.static_library
+      end
+    end
+  end
+end
+
+target 'Billora' do
+  config = use_native_modules!
+
+  use_react_native!(
+    :path => config[:reactNativePath],
+    # An absolute path to your application root.
+    :app_path => "#{Pod::Config.instance.installation_root}/.."
+  )
+
+  post_install do |installer|
+    react_native_post_install(
+      installer,
+      config[:reactNativePath],
+      :mac_catalyst_enabled => false,
+      # :ccache_enabled => true
+    )
+  end
+end
